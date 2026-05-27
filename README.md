@@ -274,6 +274,8 @@ Both skills degrade gracefully: if `QMD_WIKI_COLLECTION` / `QMD_PAPERS_COLLECTIO
 
 `_raw/` is a staging area inside your vault for unprocessed captures — rough notes, clipboard pastes, quick voice-memo transcripts. Drop files there and the next `wiki-ingest` run will promote them to proper wiki pages and remove the originals.
 
+The fastest way to feed `_raw/` during a live coding session is `/wiki-quick-chat-capture` — it scans the current conversation, extracts bugs and gotchas, and writes structured draft files in under 60 seconds with no subagents or manifest writes.
+
 The directory is created automatically by `wiki-setup`. The path is configurable via `OBSIDIAN_RAW_DIR` in `.env` (defaults to `_raw`).
 
 ---
@@ -306,6 +308,7 @@ Everything lives in `.skills/`. Each skill is a markdown file the agent reads wh
 | `wiki-update`           | Sync current project's knowledge into the vault   | `/wiki-update`           |
 | `wiki-export`           | Export vault graph to JSON, GraphML, Neo4j, HTML  | `/wiki-export`           |
 | `wiki-capture`          | Save the current conversation as a wiki note      | `/wiki-capture`          |
+| `wiki-quick-chat-capture` | Zero-friction mid-session finding capture to `_raw/` | `/wiki-quick-chat-capture` |
 | `wiki-research`         | Autonomous multi-round web research, self-filed   | `/wiki-research [topic]` |
 | `wiki-dashboard`        | Create dynamic Obsidian Bases dashboard views     | `/wiki-dashboard`        |
 | `wiki-synthesize`       | Discover and fill synthesis gaps across concepts  | `/wiki-synthesize`       |
