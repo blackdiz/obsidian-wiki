@@ -249,6 +249,19 @@ def _read_config_value(key: str) -> str:
     return ""
 
 
+def _read_config() -> dict[str, str]:
+    if not GLOBAL_CONFIG.is_file():
+        return {}
+    values: dict[str, str] = {}
+    for raw in GLOBAL_CONFIG.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"')
+    return values
+
+
 def resolve_vault_path(cli_vault: str | None) -> str:
     if cli_vault:
         return os.path.expanduser(cli_vault)
@@ -310,6 +323,262 @@ def _check_stale() -> None:
                 f"   Run: obsidian-wiki setup",
                 file=sys.stderr,
             )
+
+
+def _doctor_add(
+    checks: list[dict[str, str]],
+    *,
+    name: str,
+    status: str,
+    detail: str,
+    hint: str = "",
+) -> None:
+    checks.append({
+        "name": name,
+        "status": status,
+        "detail": detail,
+        "hint": hint,
+    })
+
+
+def _doctor_status(checks: list[dict[str, str]]) -> str:
+    statuses = {check["status"] for check in checks}
+    if "fail" in statuses:
+        return "fail"
+    if "warn" in statuses:
+        return "warn"
+    return "pass"
+
+
+def _required_vault_paths(vault: Path) -> list[Path]:
+    return [
+        vault / "index.md",
+        vault / "log.md",
+        vault / "hot.md",
+        vault / ".manifest.json",
+    ]
+
+
+def _doctor_project_check(project_dir: Path) -> dict[str, str]:
+    required = [project_dir / "AGENTS.md", *[project_dir / dest for _src, dest in BOOTSTRAP_FILES[1:]]]
+    missing = [str(path.relative_to(project_dir)) for path in required if not path.exists()]
+    if missing:
+        return {
+            "status": "warn",
+            "detail": f"missing {len(missing)} bootstrap file(s)",
+            "hint": f"run: obsidian-wiki setup --project {project_dir}",
+        }
+    aliases_missing = [alias for alias in AGENTS_ALIASES if not (project_dir / alias).exists()]
+    if aliases_missing:
+        return {
+            "status": "warn",
+            "detail": f"missing AGENTS aliases: {', '.join(aliases_missing)}",
+            "hint": f"run: obsidian-wiki setup --project {project_dir}",
+        }
+    return {"status": "pass", "detail": "bootstrap files and aliases present", "hint": ""}
+
+
+def run_doctor(*, vault_override: str | None = None, project_dir: str | None = None) -> dict[str, object]:
+    checks: list[dict[str, str]] = []
+
+    try:
+        bundled = list_skills()
+        _doctor_add(
+            checks,
+            name="bundled-skills",
+            status="pass" if bundled else "fail",
+            detail=f"{len(bundled)} bundled skill(s) available",
+            hint="" if bundled else "reinstall obsidian-wiki",
+        )
+    except FileNotFoundError as exc:
+        _doctor_add(checks, name="bundled-skills", status="fail", detail=str(exc), hint="reinstall obsidian-wiki")
+        bundled = []
+
+    boot = bootstrap_dir()
+    _doctor_add(
+        checks,
+        name="bootstrap-assets",
+        status="pass" if boot else "fail",
+        detail=str(boot) if boot else "bootstrap files not found",
+        hint="" if boot else "reinstall obsidian-wiki",
+    )
+
+    config = _read_config()
+    config_present = GLOBAL_CONFIG.is_file()
+    _doctor_add(
+        checks,
+        name="global-config",
+        status="pass" if config_present else "fail",
+        detail=str(GLOBAL_CONFIG) if config_present else "global config not written",
+        hint="" if config_present else "run: obsidian-wiki setup --vault /path/to/your/vault",
+    )
+
+    vault_path = ""
+    if vault_override:
+        vault_path = os.path.expanduser(vault_override)
+    elif config_present:
+        vault_path = config.get("OBSIDIAN_VAULT_PATH", "")
+
+    if not vault_path:
+        _doctor_add(
+            checks,
+            name="vault-config",
+            status="fail",
+            detail="OBSIDIAN_VAULT_PATH is not set",
+            hint="run: obsidian-wiki setup --vault /path/to/your/vault",
+        )
+        vault = None
+    else:
+        vault = Path(vault_path).expanduser().resolve()
+        _doctor_add(
+            checks,
+            name="vault-config",
+            status="pass",
+            detail=str(vault),
+            hint="",
+        )
+
+    setup_version = config.get("OBSIDIAN_WIKI_VERSION", "") if config_present else ""
+    if setup_version and setup_version != __version__:
+        _doctor_add(
+            checks,
+            name="setup-version",
+            status="warn",
+            detail=f"setup ran with {setup_version}; installed package is {__version__}",
+            hint="run: obsidian-wiki setup",
+        )
+    elif config_present:
+        _doctor_add(
+            checks,
+            name="setup-version",
+            status="pass",
+            detail=f"setup version matches installed package ({__version__})" if setup_version else "setup version not recorded",
+            hint="" if setup_version else "re-run setup to record install metadata",
+        )
+
+    if vault is not None:
+        if vault.is_dir():
+            _doctor_add(checks, name="vault-path", status="pass", detail="vault directory exists", hint="")
+            missing_core = [str(path.relative_to(vault)) for path in _required_vault_paths(vault) if not path.exists()]
+            if missing_core:
+                _doctor_add(
+                    checks,
+                    name="vault-core-files",
+                    status="warn",
+                    detail=f"missing {len(missing_core)} core file(s): {', '.join(missing_core)}",
+                    hint="run the wiki setup skill or create the missing files",
+                )
+            else:
+                _doctor_add(checks, name="vault-core-files", status="pass", detail="core vault files present", hint="")
+
+            manifest_path = vault / ".manifest.json"
+            if manifest_path.exists():
+                try:
+                    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    sources = data.get("sources", {})
+                    _doctor_add(
+                        checks,
+                        name="manifest-json",
+                        status="pass",
+                        detail=f"valid JSON with {len(sources)} tracked source(s)",
+                        hint="",
+                    )
+                except (json.JSONDecodeError, OSError) as exc:
+                    _doctor_add(
+                        checks,
+                        name="manifest-json",
+                        status="fail",
+                        detail=f"invalid manifest: {exc}",
+                        hint="repair or regenerate .manifest.json",
+                    )
+        else:
+            _doctor_add(
+                checks,
+                name="vault-path",
+                status="fail",
+                detail=f"vault directory not found: {vault}",
+                hint="fix OBSIDIAN_VAULT_PATH or re-run setup",
+            )
+
+    agent_summaries: list[str] = []
+    partial_agents: list[str] = []
+    full_agents = 0
+    bundled_set = set(bundled)
+    for rel, label, _subset in GLOBAL_AGENT_DIRS:
+        agent_dir = HOME / rel
+        if not agent_dir.is_dir():
+            continue
+        installed = {p.name for p in agent_dir.iterdir() if (p.is_dir() or p.is_symlink())}
+        missing = bundled_set - installed
+        count = len(installed & bundled_set)
+        agent_summaries.append(f"{label}: {count}/{len(bundled_set)}")
+        if missing:
+            partial_agents.append(label)
+        else:
+            full_agents += 1
+
+    if not agent_summaries:
+        _doctor_add(
+            checks,
+            name="agent-installs",
+            status="warn",
+            detail="no global agent skill installs found",
+            hint="run: obsidian-wiki setup",
+        )
+    elif partial_agents:
+        _doctor_add(
+            checks,
+            name="agent-installs",
+            status="warn",
+            detail="; ".join(agent_summaries),
+            hint="re-run obsidian-wiki setup to fill missing skills",
+        )
+    else:
+        _doctor_add(
+            checks,
+            name="agent-installs",
+            status="pass",
+            detail=f"{full_agents} agent install(s) fully provisioned",
+            hint="",
+        )
+
+    if project_dir:
+        project = Path(project_dir).expanduser().resolve()
+        if project.is_dir():
+            project_check = _doctor_project_check(project)
+            _doctor_add(
+                checks,
+                name="project-bootstrap",
+                status=project_check["status"],
+                detail=project_check["detail"],
+                hint=project_check["hint"],
+            )
+        else:
+            _doctor_add(
+                checks,
+                name="project-bootstrap",
+                status="fail",
+                detail=f"project directory not found: {project}",
+                hint="pass an existing directory",
+            )
+
+    return {
+        "status": _doctor_status(checks),
+        "checks": checks,
+    }
+
+
+def _print_doctor(report: dict[str, object]) -> None:
+    icon = {"pass": "✅", "warn": "⚠️ ", "fail": "❌"}
+    print(f"obsidian-wiki doctor: {report['status']}")
+    for check in report["checks"]:
+        name = check["name"]
+        status = check["status"]
+        detail = check["detail"]
+        hint = check["hint"]
+        print(f"{icon.get(status, '•')} {name}: {detail}")
+        if hint:
+            print(f"   hint: {hint}")
 
 
 # ── Commands ─────────────────────────────────────────────────────────────────
@@ -447,6 +716,21 @@ def cmd_ast_extract(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    report = run_doctor(vault_override=args.vault, project_dir=args.project)
+    if args.json:
+        if args.pretty:
+            print(json.dumps(report, indent=2))
+        else:
+            print(json.dumps(report))
+    else:
+        _print_doctor(report)
+    statuses = {check["status"] for check in report["checks"]}
+    if "fail" in statuses or (args.strict and "warn" in statuses):
+        return 1
+    return 0
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     for name in list_skills():
         print(name)
@@ -571,6 +855,17 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--pretty", action="store_true", help="pretty-print JSON output")
     ap.set_defaults(func=cmd_ast_extract)
 
+    dr = sub.add_parser(
+        "doctor",
+        help="check config, vault shape, bootstrap assets, and installed skills",
+    )
+    dr.add_argument("--vault", help="override OBSIDIAN_VAULT_PATH for this health check")
+    dr.add_argument("--project", help="also check project-local bootstrap files in this directory")
+    dr.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    dr.add_argument("--pretty", action="store_true", help="pretty-print JSON output")
+    dr.add_argument("--strict", action="store_true", help="exit non-zero on warnings as well as failures")
+    dr.set_defaults(func=cmd_doctor)
+
     return p
 
 
@@ -609,7 +904,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     # Warn about stale installs on every command except `setup` (which fixes it)
     # and `info` (which calls _check_stale itself with richer output).
-    if getattr(args, "command", None) not in ("setup", "info", None):
+    if getattr(args, "command", None) not in ("setup", "info", "doctor", None):
         _check_stale()
     try:
         return args.func(args)
