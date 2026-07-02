@@ -731,6 +731,40 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_lint(report: dict[str, object]) -> None:
+    print(f"obsidian-wiki lint: {report['status']}")
+    stats = report["stats"]
+    print(f"pages: {stats['pages']}  links: {stats['link_count']}")
+    for name, count in stats["findings"].items():
+        print(f"{name}: {count}")
+
+
+def cmd_lint(args: argparse.Namespace) -> int:
+    from obsidian_wiki.lint import lint_vault
+
+    vault_arg = args.vault or _read_config_value("OBSIDIAN_VAULT_PATH")
+    if not vault_arg:
+        print("error: vault not configured; pass a path or run obsidian-wiki setup", file=sys.stderr)
+        return 1
+
+    vault = Path(vault_arg).expanduser().resolve()
+    if not vault.is_dir():
+        print(f"error: vault not found: {vault}", file=sys.stderr)
+        return 1
+
+    report = lint_vault(vault)
+    if args.json:
+        if args.pretty:
+            print(json.dumps(report, indent=2))
+        else:
+            print(json.dumps(report))
+    else:
+        _print_lint(report)
+    if report["status"] == "fail" or (args.strict and report["status"] == "warn"):
+        return 1
+    return 0
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     for name in list_skills():
         print(name)
@@ -865,6 +899,16 @@ def build_parser() -> argparse.ArgumentParser:
     dr.add_argument("--pretty", action="store_true", help="pretty-print JSON output")
     dr.add_argument("--strict", action="store_true", help="exit non-zero on warnings as well as failures")
     dr.set_defaults(func=cmd_doctor)
+
+    lt = sub.add_parser(
+        "lint",
+        help="lint a vault for missing frontmatter, broken links, duplicates, and orphans",
+    )
+    lt.add_argument("vault", nargs="?", help="path to the Obsidian vault (defaults to configured OBSIDIAN_VAULT_PATH)")
+    lt.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    lt.add_argument("--pretty", action="store_true", help="pretty-print JSON output")
+    lt.add_argument("--strict", action="store_true", help="exit non-zero on warnings as well as failures")
+    lt.set_defaults(func=cmd_lint)
 
     return p
 
