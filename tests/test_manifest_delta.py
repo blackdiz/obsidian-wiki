@@ -71,12 +71,52 @@ class ManifestDeltaRelativeKeyTest(unittest.TestCase):
         self.assertNotIn("NEW\t", out)
         self.assertNotIn("MOD\t", out)
 
+    def test_last_ingested_recent_ingest_is_unchanged(self) -> None:
+        # cache-update writes last_ingested; delta should accept it too.
+        old = 946684800  # 2000-01-01
+        os.utime(self.source, (old, old))
+        self._write_manifest(
+            {"-Users-yician-github/abc123.jsonl": {"last_ingested": "2020-01-01T00:00:00Z"}}
+        )
+        out = self._delta()
+        self.assertIn("# 0 new, 0 modified, 1 known", out)
+        self.assertNotIn("NEW\t", out)
+        self.assertNotIn("MOD\t", out)
+
     def test_absolute_key_still_matches(self) -> None:
         # Absolute keys must keep working exactly as before.
         old = 946684800
         os.utime(self.source, (old, old))
         self._write_manifest(
             {str(self.source): {"ingested_at": "2020-01-01T00:00:00Z"}}
+        )
+        out = self._delta()
+        self.assertIn("# 0 new, 0 modified, 1 known", out)
+        self.assertNotIn("NEW\t", out)
+
+    def test_vault_uri_key_matches_scanned_vault_file(self) -> None:
+        note = self.vault / "notes" / "x.md"
+        note.parent.mkdir()
+        note.write_text("# X\n")
+        old = 946684800
+        os.utime(note, (old, old))
+        self.scan = str(self.vault / "**" / "*.md")
+        self._write_manifest(
+            {"vault://notes/x.md": {"ingested_at": "2020-01-01T00:00:00Z"}}
+        )
+        out = self._delta()
+        self.assertIn("# 0 new, 0 modified, 1 known", out)
+        self.assertNotIn("NEW\t", out)
+
+    def test_absolute_vault_key_matches_scanned_vault_file_as_vault_uri(self) -> None:
+        note = self.vault / "notes" / "x.md"
+        note.parent.mkdir()
+        note.write_text("# X\n")
+        old = 946684800
+        os.utime(note, (old, old))
+        self.scan = str(self.vault / "**" / "*.md")
+        self._write_manifest(
+            {str(note): {"ingested_at": "2020-01-01T00:00:00Z"}}
         )
         out = self._delta()
         self.assertIn("# 0 new, 0 modified, 1 known", out)
@@ -146,6 +186,41 @@ class ManifestNormalizeRelativeKeyTest(unittest.TestCase):
         )
         keys = self._keys_after_normalize(self.tmp.name)
         self.assertEqual(keys, [canon])
+
+    def test_absolute_vault_key_normalizes_to_vault_uri(self) -> None:
+        note = self.vault / "notes" / "x.md"
+        note.parent.mkdir()
+        note.write_text("# X\n")
+        self._write_manifest({str(note): {"ingested_at": "2020-01-01T00:00:00Z"}})
+
+        keys = self._keys_after_normalize(self.tmp.name)
+
+        self.assertEqual(keys, ["vault://notes/x.md"])
+
+    def test_vault_uri_and_absolute_vault_key_merge(self) -> None:
+        note = self.vault / "notes" / "x.md"
+        note.parent.mkdir()
+        note.write_text("# X\n")
+        self._write_manifest(
+            {
+                "vault://notes/x.md": {
+                    "ingested_at": "2020-01-01T00:00:00Z",
+                    "pages_created": ["references/old.md"],
+                },
+                str(note): {
+                    "ingested_at": "2021-01-01T00:00:00Z",
+                    "pages_updated": ["concepts/x.md"],
+                },
+            }
+        )
+
+        keys = self._keys_after_normalize(self.tmp.name)
+        sources = json.loads(self.manifest.read_text())["sources"]
+
+        self.assertEqual(keys, ["vault://notes/x.md"])
+        self.assertEqual(sources["vault://notes/x.md"]["ingested_at"], "2021-01-01T00:00:00Z")
+        self.assertEqual(sources["vault://notes/x.md"]["pages_created"], ["references/old.md"])
+        self.assertEqual(sources["vault://notes/x.md"]["pages_updated"], ["concepts/x.md"])
 
 
 if __name__ == "__main__":

@@ -245,7 +245,7 @@ Every time you feed the brain, it runs through four stages:
 
 **4. Schema** — The wiki schema isn't fixed upfront. It emerges from your sources and evolves as you add more. The agent maintains coherence: categories stay consistent, wikilinks point to real pages, the index reflects what's actually there. When you add a new domain (a new project, a new field of study), the schema expands to accommodate it without breaking what exists.
 
-A `.manifest.json` tracks every source that's been ingested — path, timestamps, which wiki pages it produced. On the next ingest, the agent computes the delta and only processes what's new or changed.
+A `.manifest.json` tracks every source that's been ingested — canonical source key, timestamps, and which wiki pages it produced. Vault-internal sources are keyed as `vault://relative/path.md`, so the manifest remains stable when the same vault is synced across machines with different local paths. External sources, such as agent history under `~/.codex` or `~/.claude`, keep expanded absolute paths. On the next ingest, the agent computes the delta and only processes what's new or changed.
 
 
 ## Visualization
@@ -264,7 +264,7 @@ Modes: `by-tag` (default — top 10 tags), `by-category` (the seven vault folder
 
 ## What we added on top of Karpathy's pattern
 
-- **Delta tracking.** A manifest tracks every source file that's been ingested: path, timestamps, which wiki pages it produced. When you come back later, it computes the delta and only processes what's new or changed. You're not re-ingesting your entire document library every time.
+- **Delta tracking.** A manifest tracks every source file that's been ingested: canonical source key, timestamps, which wiki pages it produced. Vault notes use portable `vault://` keys; external files use expanded absolute paths. When you come back later, it computes the delta and only processes what's new or changed. You're not re-ingesting your entire document library every time.
 
 - **Project-based organization.** Knowledge gets filed under projects when it's project-specific, globally when it's not. Both are cross-referenced with wikilinks. If you're working on 10 different codebases, each one gets its own space in the vault.
 

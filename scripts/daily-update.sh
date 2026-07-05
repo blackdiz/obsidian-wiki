@@ -88,11 +88,18 @@ if last_updated.tzinfo is None:
     last_updated = last_updated.replace(tzinfo=timezone.utc)
 
 vault_path = os.environ.get("OBSIDIAN_VAULT_PATH", "")
-stale = 0
-for path, meta in manifest.get("sources", {}).items():
-    expanded = os.path.expanduser(path)
+
+def resolve_source(path):
+    if path.startswith("vault://") and vault_path:
+        return os.path.join(vault_path, path[len("vault://"):].lstrip("/"))
+    expanded = os.path.expanduser(os.path.expandvars(path))
     if not os.path.isabs(expanded) and vault_path:
         expanded = os.path.join(vault_path, expanded)
+    return expanded
+
+stale = 0
+for path, meta in manifest.get("sources", {}).items():
+    expanded = resolve_source(path)
     if os.path.exists(expanded):
         mtime = datetime.fromtimestamp(os.path.getmtime(expanded), tz=timezone.utc)
         if mtime > last_updated:

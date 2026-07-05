@@ -6,12 +6,13 @@ markdown instructions still work without it, but this makes the manifest steps
 deterministic and testable.
 
 Source keys in `.manifest.json` are stored in a single canonical form:
-**absolute paths with `~` and environment variables expanded.** This prevents
-the same file being tracked under both `~/.claude/...` and `/Users/me/.claude/...`,
-which otherwise causes silent re-ingestion in append mode (see issues #86/#88).
+**`vault://` URIs for vault-internal sources, expanded absolute paths for
+external sources.** This prevents the same file being tracked under both
+`~/.claude/...` and `/Users/me/.claude/...`, and keeps synced vault notes stable
+across machines whose local vault paths differ.
 
 Usage:
-  # Rewrite source keys to canonical absolute paths, merging any collisions.
+  # Rewrite source keys to canonical manifest keys, merging any collisions.
   python3 scripts/manifest.py normalize <vault_path> [--dry-run]
 
   # List new/modified sources under a glob that aren't in the manifest yet.
@@ -25,11 +26,20 @@ import glob as globmod
 import json
 import os
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from obsidian_wiki.source_keys import canonical_source_key, resolve_source_key  # noqa: E402
 
 
 def canonical(path: str) -> str:
     """Single canonical key form: expand ~ and env vars, make absolute."""
     return os.path.abspath(os.path.expanduser(os.path.expandvars(path)))
+
+
+def manifest_key(vault: str, path: str) -> str:
+    return canonical_source_key(vault, path)
 
 
 def manifest_path(vault: str) -> str:
@@ -66,7 +76,11 @@ def cmd_normalize(args: argparse.Namespace) -> int:
     collisions = 0
     rekeyed = 0
     for key, entry in sources.items():
-        if not os.path.isabs(key):
+        if key.startswith("vault://"):
+            ckey = manifest_key(args.vault, key)
+            if ckey != key:
+                rekeyed += 1
+        elif not os.path.isabs(key):
             # Real vaults store some keys relative to the ingest root (e.g.
             # "-Users-x-github/abc.jsonl" under ~/.claude/projects/). canonical()
             # would resolve those against the CWD and rewrite them to a bogus
@@ -75,7 +89,7 @@ def cmd_normalize(args: argparse.Namespace) -> int:
             print(f"  WARN   preserving relative key as-is (not canonicalized): {key}")
             ckey = key
         else:
-            ckey = canonical(key)
+            ckey = manifest_key(args.vault, key)
             if ckey != key:
                 rekeyed += 1
         if ckey in new_sources:
@@ -123,7 +137,7 @@ def _relative_key_index(sources: dict) -> dict[str, list[tuple[str, dict]]]:
     """
     index: dict[str, list[tuple[str, dict]]] = {}
     for k, v in sources.items():
-        if not os.path.isabs(k):
+        if not k.startswith("vault://") and not os.path.isabs(k):
             index.setdefault(os.path.basename(k), []).append((k, v))
     return index
 
@@ -139,7 +153,8 @@ def _match_relative(path: str, index: dict[str, list[tuple[str, dict]]]) -> dict
 def cmd_delta(args: argparse.Namespace) -> int:
     m = load_manifest(args.vault)
     sources = m.get("sources", {})
-    known = {canonical(k): v for k, v in sources.items()}
+    known = {manifest_key(args.vault, k): v for k, v in sources.items()}
+    known_resolved = {canonical(resolve_source_key(args.vault, k)): v for k, v in sources.items()}
     rel_index = _relative_key_index(sources)
     skips = _skip_patterns(args.skip)
 
@@ -151,15 +166,17 @@ def cmd_delta(args: argparse.Namespace) -> int:
         if any(s in path for s in skips):
             skipped += 1
             continue
-        ckey = canonical(path)
+        ckey = manifest_key(args.vault, path)
         entry = known.get(ckey)
+        if entry is None:
+            entry = known_resolved.get(canonical(path))
         if entry is None:
             entry = _match_relative(path, rel_index)
         if entry is None:
             new.append(ckey)
         else:
             mtime = os.path.getmtime(path)
-            ingested = str(entry.get("ingested_at", ""))
+            ingested = str(entry.get("ingested_at") or entry.get("last_ingested") or "")
             # modified if file changed after it was last ingested
             from datetime import datetime, timezone
 
@@ -184,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="command", required=True)
 
-    n = sub.add_parser("normalize", help="rewrite source keys to canonical absolute paths")
+    n = sub.add_parser("normalize", help="rewrite source keys to canonical manifest keys")
     n.add_argument("vault", help="path to the Obsidian vault (contains .manifest.json)")
     n.add_argument("--dry-run", action="store_true", help="preview without writing")
     n.set_defaults(func=cmd_normalize)

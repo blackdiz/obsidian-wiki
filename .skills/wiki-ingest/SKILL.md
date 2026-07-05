@@ -438,6 +438,8 @@ After writing pages, check that wikilinks work in both directions. If page A lin
   "pages_updated": ["list/of/pages.md"]
 }
 ```
+Key vault-internal sources as `vault://relative/path.md` rather than as local absolute paths. Key external files with expanded absolute paths. Prefer `obsidian-wiki cache-update` when available; it applies the same canonical key rules and avoids cross-device duplicate entries.
+
 `content_hash` is the SHA-256 of the file contents at ingest time. Always write it — it's the primary skip signal on subsequent runs.
 
 Also update `stats.total_sources_ingested` and `stats.total_pages`.

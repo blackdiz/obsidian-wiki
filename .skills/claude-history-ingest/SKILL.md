@@ -32,10 +32,10 @@ Check `.manifest.json` for each source file (conversation JSONL, memory file). O
 
 This is usually what you want — the user ran a few new sessions and wants to capture the delta.
 
-> **Canonical paths when comparing.** The manifest keys are absolute paths with `~` expanded (see `llm-wiki/SKILL.md` → `.manifest.json`). Before deciding a file is "new", expand its path the same way — otherwise a file already tracked as `~/.claude/...` looks new when you scanned it as `/Users/me/.claude/...` (or vice-versa) and gets re-ingested. The `scripts/manifest.py` helper does this for you:
+> **Canonical paths when comparing.** The manifest uses `vault://` keys for vault-internal files and expanded absolute paths for external files (see `llm-wiki/SKILL.md` → `.manifest.json`). Before deciding a file is "new", canonicalize it the same way — otherwise a file already tracked as `~/.claude/...` looks new when you scanned it as `/Users/me/.claude/...` (or vice-versa) and gets re-ingested. The `scripts/manifest.py` helper does this for you:
 >
 > ```bash
-> # New/modified sources, honoring WIKI_SKIP_PROJECTS + --skip, paths already canonical:
+> # New/modified sources, honoring WIKI_SKIP_PROJECTS + --skip, output keys canonical:
 > python3 "$OBSIDIAN_WIKI_REPO/scripts/manifest.py" delta "$OBSIDIAN_VAULT_PATH" \
 >   --scan "$CLAUDE_HISTORY_PATH/projects/*/memory/*.md"
 > # One-time repair if the manifest already mixes ~ and absolute keys:

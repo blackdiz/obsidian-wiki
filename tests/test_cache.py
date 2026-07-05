@@ -159,6 +159,55 @@ class TestUpdateSource:
         assert str(src_file) in sources
         assert str(src_dir) in sources
 
+    def test_vault_internal_source_uses_vault_uri_key(self, vault):
+        note = vault / "journals" / "today.md"
+        note.parent.mkdir()
+        note.write_text("# Today\n", encoding="utf-8")
+
+        update_source(vault, note)
+
+        sources = _load_manifest(vault)
+        assert "vault://journals/today.md" in sources
+        assert str(note) not in sources
+
+    def test_vault_internal_legacy_absolute_key_matches(self, vault):
+        note = vault / "note.md"
+        note.write_text("# Note\n", encoding="utf-8")
+        h = sha256_file(note)
+        manifest = {
+            "sources": {
+                str(note): {
+                    "content_hash": h,
+                    "last_ingested": "2026-01-01T00:00:00+00:00",
+                }
+            }
+        }
+        _manifest_path(vault).write_text(json.dumps(manifest), encoding="utf-8")
+
+        result = check_sources(vault, [note])
+
+        assert str(note) in result["unchanged"]
+
+    def test_vault_internal_update_migrates_legacy_absolute_key(self, vault):
+        note = vault / "note.md"
+        note.write_text("# Note\n", encoding="utf-8")
+        manifest = {
+            "sources": {
+                str(note): {
+                    "content_hash": "old",
+                    "pages_produced": ["concepts/old.md"],
+                }
+            }
+        }
+        _manifest_path(vault).write_text(json.dumps(manifest), encoding="utf-8")
+
+        update_source(vault, note)
+
+        sources = _load_manifest(vault)
+        assert "vault://note.md" in sources
+        assert str(note) not in sources
+        assert sources["vault://note.md"]["pages_produced"] == ["concepts/old.md"]
+
 
 # ---------------------------------------------------------------------------
 # CLI

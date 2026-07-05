@@ -7,7 +7,7 @@ instead of shelling out to sha256sum and manually parsing .manifest.json.
 Manifest format (.manifest.json in the vault root):
 {
   "sources": {
-    "<abs-or-rel-path>": {
+    "vault://notes/source.md": {
       "content_hash": "<sha256-hex>",
       "last_ingested": "<ISO-8601>",
       "pages_produced": ["<vault-relative-page-path>", ...]
@@ -24,6 +24,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
+
+from obsidian_wiki.source_keys import canonical_source_key, lookup_source_entry, resolve_source_key
 
 
 class SourceEntry(TypedDict, total=False):
@@ -104,23 +106,28 @@ def check_sources(vault: Path, source_paths: list[Path]) -> CheckResult:
     result: CheckResult = {"new": [], "modified": [], "unchanged": [], "missing": []}
 
     for path in source_paths:
-        key = str(path)
+        display_key = str(path)
         if not path.exists():
-            result["missing"].append(key)
+            result["missing"].append(display_key)
             continue
         current_hash = compute_hash(path)
-        entry = sources.get(key) or sources.get(os.path.abspath(key))
+        _, entry = lookup_source_entry(sources, vault, path)
         if entry is None:
-            result["new"].append(key)
+            result["new"].append(display_key)
         elif entry.get("content_hash") != current_hash:
-            result["modified"].append(key)
+            result["modified"].append(display_key)
         else:
-            result["unchanged"].append(key)
+            result["unchanged"].append(display_key)
 
     # Report manifest keys that no longer exist on disk (not in source_paths scan)
-    checked = {str(p) for p in source_paths} | {os.path.abspath(p) for p in source_paths}
+    checked = {
+        key
+        for path in source_paths
+        for key in (str(path), os.path.abspath(path), canonical_source_key(vault, path))
+    }
     for key in sources:
-        if key not in checked and not Path(key).exists():
+        resolved = resolve_source_key(vault, key)
+        if key not in checked and not Path(resolved).exists():
             result["missing"].append(key)
 
     return result
@@ -134,9 +141,12 @@ def update_source(
 ) -> str:
     """Record the current hash of *source_path* in the manifest. Returns the hash."""
     sources = _load_manifest(vault)
-    key = str(source_path)
+    key = canonical_source_key(vault, source_path)
     current_hash = compute_hash(source_path)
-    entry: SourceEntry = sources.get(key, {})
+    existing_key, existing_entry = lookup_source_entry(sources, vault, source_path)
+    entry: SourceEntry = existing_entry or {}
+    if existing_key and existing_key != key:
+        sources.pop(existing_key, None)
     entry["content_hash"] = current_hash
     entry["last_ingested"] = datetime.now(timezone.utc).isoformat()
     if pages_produced is not None:
