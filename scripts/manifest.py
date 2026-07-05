@@ -28,7 +28,10 @@ import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+for parent in Path(__file__).resolve().parents:
+    if (parent / "obsidian_wiki" / "source_keys.py").exists():
+        sys.path.insert(0, str(parent))
+        break
 
 from obsidian_wiki.source_keys import canonical_source_key, resolve_source_key  # noqa: E402
 
