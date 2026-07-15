@@ -2,6 +2,10 @@
 
 A **skill-based framework** for building and maintaining an Obsidian knowledge base. No scripts or dependencies — everything is markdown instructions that you execute directly.
 
+## README Translation Parity
+
+`README.md` and `README_TW.md` are one documentation surface. Changing either file requires changing the other in the same change set. Keep headings, examples, links, and user-facing behavior aligned between the two translations. The `readmes-change-together` CI job enforces that both files change together; reviewers assess translation quality.
+
 ## Configuration
 
 Resolve config using the Config Resolution Protocol in `llm-wiki/SKILL.md`:

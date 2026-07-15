@@ -51,6 +51,14 @@ class ReadmeSyncTest(unittest.TestCase):
             "Update both files in the same change set.\n",
         )
 
+    def test_readme_sync_policy_is_documented(self) -> None:
+        for path in (ROOT / "AGENTS.md", ROOT / "README.md", ROOT / "README_TW.md"):
+            with self.subTest(path=path.name):
+                contents = path.read_text(encoding="utf-8")
+                self.assertIn("README.md", contents)
+                self.assertIn("README_TW.md", contents)
+                self.assertIn("readmes-change-together", contents)
+
 
 if __name__ == "__main__":
     unittest.main()

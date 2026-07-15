@@ -566,6 +566,10 @@ claude
 
 這還很早期。skills 已可用，但還有很多地方能讓這個大腦更聰明：更好的 cross-referencing、更精準的 deduplication、更大的 vaults、新的 ingest sources。如果你也一直在思考這個問題，或有某個 workflow 可以變成 skill，歡迎 PR。
 
+### 保持兩份 README 同步
+
+`README.md` 是英文文件，`README_TW.md` 是其繁體中文翻譯；兩者共同構成同一份文件介面。任何變更其中一個檔案的 PR，都必須在同一個 PR 中更新另一個檔案。兩份翻譯的標題、範例、連結與面向使用者的行為，應在結構與語意上保持一致。`readmes-change-together` CI job 會強制兩個檔案一起變更，而 reviewers 則負責評估翻譯品質。
+
 ### 新增 skill
 
 1. 在 `.skills/your-skill-name/` 建立資料夾
